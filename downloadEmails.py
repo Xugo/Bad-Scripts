@@ -8,12 +8,12 @@ import os.path
 from pywintypes import com_error
 import sys
 
-""" Temporary solution to simplify execution of the script"""
-defaultFolderPath = ""	# Specify the location the attachment(s) in question will be found
+"""Temporary solution to simplify execution of the script"""
+defaultFolderPath = ""	# Specify the location of the email in question
 defaultSenderEmailAddress = ""	# Specify the email address of the sender to only look at messages from that address within the specified folder
 defaultSubject = ""	# Specify the subject to only look at emails with that subject within the specified folder
-defaultFileName = ""	# Specify the name of the attachment that needs to be downloaded
-""" """
+defaultFileName = ""	# Specify the name of the attachment that needs to be downloaded, leave blank to download all attachments in the email
+""""""
 
 def main():
 	print("\nInitializing Script to Extract Attachments from Outlook emails...\n")
