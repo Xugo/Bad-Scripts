@@ -8,15 +8,17 @@ import os.path
 from pywintypes import com_error
 import sys
 import re
+import pandas as pd
+import time
 
 """Temporary solution to simplify execution of the script"""
-defaultFolderPath = ""	# Specify the location of the email in question
+defaultFolderPath = "Test\\Nested Test"	# Specify the location of the email in question
 defaultSenderEmailAddress = ""	# Specify the email address of the sender to only look at messages from that address within the specified folder
 defaultSubject = ""	# Specify the subject to only look at emails with that subject within the specified folder
 """"""
 
 def main():
-	print("\nInitializing dcript to process Outlook emails...\n")
+	print("\nInitializing script to process Outlook emails...\n")
 
 	folderPath = requestFolderPath(defaultFolderPath)
 
@@ -25,16 +27,36 @@ def main():
 	rootFolder = namespace.Folders.Item(1)
 	inbox = getFolder(rootFolder, folderPath)
 
+	df = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+
 	for message in inbox.Items:
-		if (defaultSenderEmailAddress == "") | (message.SenderEmailAddress == defaultSenderEmailAddress):
-			if (defaultSubject == "") | (message.Subject == defaultSubject):
-				if (message.Unread == True):
+		if (message.Unread == True):
+			if (defaultSenderEmailAddress == "") | (message.SenderEmailAddress == defaultSenderEmailAddress):
+				if (defaultSubject == "") | (message.Subject == defaultSubject):
 					print("Extracting IOCs from", message.subject, message.CreationTime)
-					parseEmail(message.body)
+					df = df.append(parseEmail(message.body))
 					message.Unread = False
+
+	exportToExcel(df)
 
 	print("Done.")
 
+def exportToExcel(df):
+	dfFinal = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+
+	dfFinal = dfFinal.append(df)
+
+	ts = time.gmtime()
+	time.strftime("%Y-%m-%d %H:%M:%S", ts)
+
+	# Create a Pandas Excel writer using XlsxWriter as the engine.
+	writer = pd.ExcelWriter("PhishMeIOCs" + time.strftime("%Y-%m-%d_%H-%M-%S", ts) + ".xlsx", engine="xlsxwriter")
+
+	# Convert the dataframe to an XlsxWriter Excel object.
+	dfFinal.to_excel(writer, sheet_name='Sheet1', index=False)
+
+	# Close the Pandas Excel writer and output the Excel file.
+	writer.save()
 
 def requestFolderPath(folderPath):
 	"""Prompt user for folder path when defaultFolderPath is blank"""
@@ -47,7 +69,6 @@ def requestFolderPath(folderPath):
 		return input("Please specify the location of the email(s): ")
 	else:
 		return folderPath
-
 
 def getFolder(baseFolder, folderPath):
 	"""Parse user input and attempt to navigate to the specified folder"""
@@ -68,7 +89,6 @@ def getFolder(baseFolder, folderPath):
 			raise e
 		sys.exit()
 
-
 def parseEmail(msg):
 	print("Commencing parsing of email...\n")
 
@@ -82,6 +102,8 @@ def parseEmail(msg):
 
 	index = 0
 
+	df = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+
 	for section in bodySplitByIOCs:
 		if (index % 2 == 1):
 			index += 1
@@ -92,17 +114,19 @@ def parseEmail(msg):
 		m2 = re.compile(rIOCs[2]).match(section)
 
 		if m0:
-			parseMaliciousFiles(bodySplitByIOCs[index+1])
+			df = df.append(parseMaliciousFiles(bodySplitByIOCs[index+1]))
 		elif m1:
-			parseMaliciousURLs(bodySplitByIOCs[index+1])
+			df = df.append(parseMaliciousURLs(bodySplitByIOCs[index+1]))
 		elif m2:
-			parseMaliciousIPs(bodySplitByIOCs[index+1])
+			df = df.append(parseMaliciousIPs(bodySplitByIOCs[index+1]))
 		else:
 			print("No IOCs found")
 
-		index += 1
+		index = index + 1
 
 	print("\nParsing complete...\n")
+
+	return(df)
 
 def cleanOriginalEmail(msg):
 	body = re.sub(r'\r', '', msg)
@@ -115,7 +139,6 @@ def cleanOriginalEmail(msg):
 		body = pStart.split(body)[2]
 	except:
 		print("Declaration of IOCs not found.")
-		exit()
 
 	return pEnd.split(body)[0]
 
@@ -137,14 +160,26 @@ def parseMaliciousFiles(msg):
 
 	infoType = ["File Name", "MD5", "SHA256"]
 	index = 0
+
+	df = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+	dfTemp = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"], index=[1])
+
 	for info in fileSplitByInfo:
-		if (index % 3 == 1):
-			print(infoType[1] + ": " + info.group())
+		if (index % 3 == 0):
+			print("File Name: " + info.group())
+			dfTemp.iloc[0, 0] = info.group()
+		elif (index % 3 == 1):
+			print("MD5: " + info.group())
+			dfTemp.iloc[0, 3] = info.group()
 		elif (index % 3 == 2):
-			print(infoType[2] + ": " + info.group())
+			print("SHA256: " + info.group())
+			dfTemp.iloc[0, 4] = info.group()
+			df = df.append(dfTemp, ignore_index=True)
 		else:
-			print(infoType[0] + ": " + info.group())
+			print("Panic!")
 		index = index + 1
+
+	return df
 
 def parseMaliciousURLs(msg):
 	rUrl = re.compile(r'(?=[a-zA-Z]{4,5}:\/\/).*')
@@ -153,9 +188,18 @@ def parseMaliciousURLs(msg):
 
 	listOfDomains = []
 
+	df = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+	dfTemp = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"], index=[1])
+
 	for url in urls:
 		print("URL:", url)
-		print("Domain:", extractDomain(url))
+		dfTemp.iloc[0, 0] = url
+		domain = extractDomain(url)
+		print("Domain:", domain)
+		dfTemp.iloc[0, 2] = domain
+		df = df.append(dfTemp, ignore_index=True)
+
+	return df
 
 def extractDomain(url):
 	mUrlProtocol = re.search(r'(((hxxp:\/\/)|(hxxps:\/\/)|(http:\/\/)|(https:\/\/))(((www)?((\[\.\])|\[\.\]))|\.?))', url).group(1)
@@ -177,7 +221,15 @@ def parseMaliciousIPs(msg):
 
 	IPs = rIP.findall(msg)
 
+	df = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"])
+	dfTemp = pd.DataFrame(columns=["IOC", "Owner", "Domain", "MD5", "SHA256", "Notes"], index=[1])
+
 	for IP in IPs:
-		print("IP:", sanitize(IP))
+		sanitizedIP = sanitize(IP)
+		print("IP:", sanitizedIP)
+		dfTemp.iloc[0, 0] = sanitizedIP
+		df = df.append(dfTemp, ignore_index=True)
+
+	return df
 
 main()
